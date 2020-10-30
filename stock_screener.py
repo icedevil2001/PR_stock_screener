@@ -3,7 +3,7 @@
 from pandas_datareader import data as pdr
 from yahoo_fin import stock_info as si
 # import yahoo_fin
-from pandas import ExcelWriter
+#from pandas import ExcelWriter
 import yfinance as yf
 import pandas as pd
 import requests
@@ -70,29 +70,33 @@ class Moving_avg:
     self.stock_rs_strange = calc_relative_strength(self.df)
     self.rs_rating = rs_rating(self.stock_rs_strange, self.index_rs_strange)
     self.min_rs_rating = min_rs_rating
+    self.low_of_52week = self.df["adj_close"][-260:].min()
+    self.high_of_52week = self.df["adj_close"][-260:].max()
+
     try:
       ## Need to double check this 
       ## should SMA trending up for at least 1 month (ideally 4-5 months)
-      self.sma200_20 = df["SMA_200"][-20]
+        self.sma200_20 = df["SMA_200"][-20]
     except:
-      self.sma200_20 = 0
-    self.low_of_52week = self.df["adj_close"][-260:].min()
-    self.high_of_52week = self.df["adj_close"][-260:].max()
-  
+        self.sma200_20 = 0
+
   def as_dict(self):
-    
+    try:
+        company_name = yf.Ticker(self.stockname).info['longName']
+    except:
+        company_name = self.stockname
     # return self.__dict__
     return OrderedDict([
-        ('Company Name', yf.Ticker(self.stockname).info['longName']),
-        ('Ticker', self.stockname),
-        ('Current Price', self.price),
-        ('RS Rating', self.rs_rating),
-        ('SMA 50 Day', self.sma50),
-        ('SMA 150 Day', self.sma150),
-        ('SMA 200 Day', self.sma200),
-        ('52 Week Low', self.low_of_52week),
-        ('52 Week High', self.high_of_52week),
-    ])
+       ('Company Name', company_name),
+       ('Ticker', self.stockname),
+       ('Current Price', self.price),
+       ('RS Rating', self.rs_rating),
+       ('SMA 50 Day', self.sma50),
+       ('SMA 150 Day', self.sma150),
+       ('SMA 200 Day', self.sma200),
+       ('52 Week Low', self.low_of_52week),
+       ('52 Week High', self.high_of_52week),
+       ])
 
   def calc_moving_avg(self, df):
     for x in [50,150,200]:
@@ -185,10 +189,10 @@ def stock_screener(index_tinker_name='S&P500', min_vol=5e6, min_price=0, days=36
 	stocklist = index_list.get(index_tinker_name)[:]
 
 	index_rs_strange_value = calc_relative_strength(
-								get_stock(
-									index_tinker[index_tinker_name], days
-									)
-								)
+					    	get_stock(
+			    				index_tinker[index_tinker_name], days
+							)
+                                                )
 
 	final = []
 	index = []
@@ -196,6 +200,7 @@ def stock_screener(index_tinker_name='S&P500', min_vol=5e6, min_price=0, days=36
 	exclude_list = []
 	all_data = []
 	latest_iteration = st.empty()
+	having_break = st.empty()
 	bar = st.progress(0)
 	total = len(stocklist)
 
@@ -219,16 +224,24 @@ def stock_screener(index_tinker_name='S&P500', min_vol=5e6, min_price=0, days=36
 		else:
 			print(f'Failed conditions: {stock_name}')  
 			# all_data.append(stock_meta.as_dict())
-		latest_iteration.text(f'Iteration {(num+1)}/{total}')
+		
+		latest_iteration.text(f'Stocks Processed: {(num+1)}/{total}')
 		bar.progress((num+1)/total)
 	
 
 		if num == 0:
 			continue
 		if num % 10 == 0:
-			time.sleep(5)
+			for i in list(range(5))[::-1]:
+				having_break.text(f'waiting for {i}sec')
+				time.sleep(1)
+			# having_break = st.empty()
 		if num % 100 == 0:
-			time.sleep(5*60)
+			for i in list(range(3))[::-1]:
+				having_break.text(f'waiting for {i}min')
+				time.sleep(60)
+			# having_break = st.empty()
+			# time.sleep(5*60)
 
 	final_df = pd.DataFrame(final)
 	# all_data_df = pd.DataFrame(all_data)
