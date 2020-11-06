@@ -1,19 +1,15 @@
 #stock_screener.py
 
-from pandas_datareader import data as pdr
+
 from yahoo_fin import stock_info as si
-# import yahoo_fin
-#from pandas import ExcelWriter
 import yfinance as yf
 import pandas as pd
 import requests
 import datetime
 import time
-from pprint import pprint
 from collections import OrderedDict
 import streamlit as st
 import base64
-
 
 def period(days=365):
   '''
@@ -24,7 +20,12 @@ def period(days=365):
   return start_date, end_date 
 
 def calc_relative_strength(df):
-  ## relative gain and losses
+
+  # if "adj_close" in df.columns:
+
+  if isinstance(df, pd.Series):
+    ## relative gain and losses
+    df = df.rename('adj_close').to_frame()
   df['close_shift'] = df['adj_close'].shift(1)
   ## Gains (true) and Losses (False)
   df['gains'] = df.apply(lambda x: x['adj_close'] if x['adj_close'] >= x['close_shift'] else 0, axis=1)
@@ -35,129 +36,13 @@ def calc_relative_strength(df):
 
   return avg_gain / avg_losses
 
-def get_stock(stock, days=365):
-	start_date, end_date =period(days)
-	try: 
-		df = pdr.get_data_yahoo(stock, start=start_date, end=end_date )
-		df = df.drop(['High', 'Low', 'Open','Close'], axis=1)
-		df = df.rename(columns={'Adj Close': "adj_close"})
-		
-	except:
-		return False
-	if len(df) < 2:
-		print('Less 2')
-		return False
-	return df
+def ftsc100():
+	fstc = pd.read_html('https://en.wikipedia.org/wiki/FTSE_100_Index')[3].loc[:, 'EPIC'].to_list()
+	return [f'{x.replace(".", "")}.L' for x in fstc]
 	
 def rs_rating(stock_rs_strange_value, index_rs_strange_value):
   # print(f'Stock RS:{stock_rs_strange_value}, Index RS:{index_rs_strange_value}')
   return 100 * ( stock_rs_strange_value / index_rs_strange_value )
-
-class Moving_avg:
-  # self.index_strange = index_strange 
-  def __init__(self, stockname, df,  index_strange, min_rs_rating=70):
-    self.stockname = stockname
-    self.df = df
-    
-    # self.stock_data = get_stock(stockname)
-
-    self.df = self.calc_moving_avg(self.df)
-    self.price = self.df['adj_close'][-1]
-    self.sma50 = self.df["SMA_50"][-1]
-    self.sma150 = self.df["SMA_150"][-1]
-    self.sma200 = self.df["SMA_200"][-1]
-    self.index_rs_strange = index_strange
-    self.stock_rs_strange = calc_relative_strength(self.df)
-    self.rs_rating = rs_rating(self.stock_rs_strange, self.index_rs_strange)
-    self.min_rs_rating = min_rs_rating
-    self.low_of_52week = self.df["adj_close"][-260:].min()
-    self.high_of_52week = self.df["adj_close"][-260:].max()
-
-    try:
-      ## Need to double check this 
-      ## should SMA trending up for at least 1 month (ideally 4-5 months)
-        self.sma200_20 = df["SMA_200"][-20]
-    except:
-        self.sma200_20 = 0
-
-  def as_dict(self):
-    try:
-        company_name = yf.Ticker(self.stockname).info['longName']
-    except:
-        company_name = self.stockname
-    # return self.__dict__
-    return OrderedDict([
-       ('Company Name', company_name),
-       ('Ticker', self.stockname),
-       ('Current Price', self.price),
-       ('RS Rating', self.rs_rating),
-       ('SMA 50 Day', self.sma50),
-       ('SMA 150 Day', self.sma150),
-       ('SMA 200 Day', self.sma200),
-       ('52 Week Low', self.low_of_52week),
-       ('52 Week High', self.high_of_52week),
-       ])
-
-  def calc_moving_avg(self, df):
-    for x in [50,150,200]:
-      df["SMA_"+str(x)] = round(df['adj_close'].rolling(window=x).mean(), 2)
-    return df
-  
-
-  def avg_volume(self):
-    return self.df['volume'].mean()
-
-  def condition1(self):
-    # Condition 1: Current Price > 150 SMA and > 200 SMA
-    if (self.price > self.sma150 and self.price > self.sma200):
-      return True
-
-  def condition2(self):
-    # Condition 2: 150 SMA and > 200 SMA
-    if (self.sma150 > self.sma200):
-      return True
-
-  def condition3(self):
-    # Condition 3: 200 SMA trending up for at least 1 month (ideally 4-5 months)
-    if self.sma200 > self.sma200_20:
-      return True 
-  
-  def condition4(self):
-    # Condition 4: 50 SMA> 150 SMA and 50 SMA> 200 SMA
-    if self.sma50 > self.sma150 > self.sma200:
-      return True
-
-  def condition5(self):
-    # Condition 5: Current Price > 50 SMA
-    if self.price > self.sma50:
-      return True 
-  
-  def condition6(self):
-    # Condition 6: Current Price is at least 30% above 52 week low (Many of the best are up 100-300% before coming out of consolidation)
-    if self.price >= (1.3 * self.low_of_52week):
-      return True
-  
-  def condition7(self):
-  # Condition 7: Current Price is within 25% of 52 week high
-    if self.price >= (0.75 * self.high_of_52week):
-      return True
-  
-  def condition8(self):
-  # Condiction 8: IBD RS_Rating greater than 70
-    if self.rs_rating >=self.min_rs_rating:
-      return True
-
-  def all_conditions(self):
-    if all(
-        [self.condition1(),
-          self.condition2(),
-          self.condition3(),
-          self.condition4(),
-          self.condition5(),
-          self.condition6(),
-          self.condition7(),
-          self.condition8()]):
-    	return True
 
 def filedownload(df):
     csv = df.to_csv(index=False)
@@ -165,97 +50,258 @@ def filedownload(df):
     href = f'<a href="data:file/csv;base64,{b64}" download="MM_stock_screener.csv">Download CSV File</a>'
     return href    
 
-def stock_screener(index_tinker_name='S&P500', min_vol=5e6, min_price=0, days=365, min_rs_rating=70,):
-# help(si)
-	## fix for yahoo_fin
-	start_date, end_date = period(days)
-	yf.pdr_override()
+def get_stock(stocklist, days=365):
+	start_date, end_date =period(days)
+	df = yf.download(stocklist, start=start_date, end=end_date)
+	df = df.drop(['High', 'Low', 'Open','Close'], axis=1)
+	df = df.rename(columns={'Adj Close': "adj_close"})
+	return df
 
-	index_tinker = {
-		'DOW': 'DOW',
-		'NASDAQ': '^IXIC', 
-		"S&P500": '^GSPC'
-	}
+def get_index_companies(index_tinker ):
+  index_stocklist = {
+    'DOW': si.tickers_sp500(),
+    'NASDAQ': si.tickers_nasdaq(),
+    "S&P500": si.tickers_sp500(),
+    'FTSE100': ftsc100()
+    }
+  if isinstance(index_tinker, str):
+    stocklist = index_stocklist.get(index_tinker)
+    if stocklist:
+      return stocklist
+    else:
+      return [index_tinker]
+  else: 
+    return index_tinker
 
-	index_list = {
-		'DOW': si.tickers_sp500(),
-		'NASDAQ': si.tickers_nasdaq(),
-		"S&P500": si.tickers_sp500()
-	}
-	st.header(f'Stock Screener {index_tinker_name}')
-	# stocklist = si.tickers_sp500()
-	min_volume = min_vol
-	# index_name = '^GSPC' # SPY or S&P 500
-	stocklist = index_list.get(index_tinker_name)[:]
+def get_company_name(tinker):
+  '''
+  Get the company name if possible
+  '''
+  try:
+    return yf.Ticker(tinker).info['longName']
+  except:
+    return tinker
 
-	index_rs_strange_value = calc_relative_strength(
-					    	get_stock(
-			    				index_tinker[index_tinker_name], days
-							)
-                                                )
+def index_tinker(index_symbol):
+  
+  index_tinker = {
+    'DOW': 'DOW',
+    'NASDAQ': '^IXIC', 
+    "S&P500": '^GSPC',
+    'FTSE100': '^FTSE'
+    }
+  return index_tinker.get(index_symbol)
 
-	final = []
-	index = []
+def SMA_50(df):
+  '''
+  Simple moving average (SMA) over 50days
+  '''
+  return round(df.rolling(window=50).mean(), 2)[-1]
 
-	exclude_list = []
-	all_data = []
-	latest_iteration = st.empty()
-	having_break = st.empty()
-	bar = st.progress(0)
-	total = len(stocklist)
+def SMA_150(df):
+  '''
+  Simple moving average (SMA) over 150days
+  '''
+  return round(df.rolling(window=150).mean(), 2)[-1]
 
-	for num, stock_name in enumerate(stocklist):
-		print(f"checking {num}:{stock_name}")
-		if stock_name in exclude_list:
-			continue
-			FAILED = False
-		df = get_stock(stock_name)
-		# print('**',df)
-		if df is False:
-			print(f'SKIPPED to download {stock_name} {num}')
-			continue
+def SMA_200(df):
+  '''
+  Simple moving average (SMA) over 200days
+  '''
+  return round(df.rolling(window=200).mean(), 2)[-1]
 
-		stock_meta = Moving_avg(stock_name, df, index_rs_strange_value, min_rs_rating)
-		time.sleep(0.2)
+def Low_52week(df):
+  '''
+  Lowest price of 52 weeks
+  '''
+  return df.iloc[-260:].min()
 
-		if stock_meta.all_conditions():
-			print(f'Passed conditions: {stock_name}')
-			final.append(stock_meta.as_dict())
-		else:
-			print(f'Failed conditions: {stock_name}')  
-			# all_data.append(stock_meta.as_dict())
-		
-		latest_iteration.text(f'Stocks Processed: {(num+1)}/{total}')
-		bar.progress((num+1)/total)
+def High_52week(df):
+  '''
+  High price of 52 weeks
+  '''
+  return df.iloc[-260:].min()
+
+def Current_Price(df):
+  return df.iloc[-1] 
+
+def Avg_Price_Month(df):
+  return df.iloc[-20:].mean()
+
+def SMA_200_20(df):
+  '''
+  Simple moving average (SMA) over 200days at 1month (20days week days)
+  '''
+  val = round(df.rolling(window=200).mean() )
+  return val[-20]
+
+def Perc_Change_Over_Year(df):
+  '''
+  Calculate percentage change over the year
+  '''
+  return 100 * (df.iloc[-1] / df.iloc[0])
+
+def Avg_Volume(df):
+  ''' 
+  Calculate average volumne df['volume']
+  '''
+  return df.mean()
+
+## -- Conditions -- ##
+def condition1(df):
+  # Condition 1: Current Price > 150 SMA and > 200 SMA
+  if (df.Current_Price > df.SMA_150 and df.Current_Price > df.SMA_200):
+    return True
+  return False
+
+def condition2(df):
+  # Condition 2: 150 SMA and > 200 SMA
+  if (df.SMA_150 > df.SMA_200):
+    return True
+  return False
+
+def condition3(df):
+  # Condition 3: 200 SMA trending up for at least 1 month (ideally 4-5 months)
+  if df.SMA_200 > df.SMA_200_20:
+    return True 
+  return False
+
+def condition4(df):
+  # Condition 4: 50 SMA> 150 SMA and 50 SMA> 200 SMA
+  if df.SMA_50 > df.SMA_150 > df.SMA_200:
+    return True
+  return False
+
+def condition5(df):
+  # Condition 5: Current Price > 50 SMA
+  if df.Current_Price > df.SMA_50:
+    return True 
+  return False
+
+def condition6(df):
+  # Condition 6: Current Price is at least 30% above 52 week low (Many of the best are up 100-300% before coming out of consolidation)
+  if df.Current_Price >= (1.3 * df.Low_52week):
+    return True
+  return False
+
+def condition7(df):
+  # Condition 7: Current Price is within 25% of 52 week high
+  if df.Current_Price >= (0.75 * df.High_52week):
+    return True
+  return False
+
+def condition8(df, min_rs_rating=70):
+  # Condiction 8: IBD RS_Rating greater than 70
+  if df.RS_rating >= min_rs_rating:
+    return True
+  return False
+
+def min_average_volume(df, min_vol=1000):
+		if df.Average_Volume> min_vol:
+		    return True
+		return False
+## -- End Condition -- ##
+
+
+def stock_screener(index_symbol, min_volume=1, min_price=10, days=365, min_rs_rating=70):
+
+	# index_symbol = 'FTSE100'
+	# iteration = st.empty()
+
+	# iteration.text(f'Stocks Processed: {(num+1)}/{total}')
+
+	st.text('Please be patient, it may take several minutes..')
+
+	## Get index data
+	index_df = get_stock(index_tinker(index_symbol))
+
+	## calculate index RS strength 
+	index_rs_strength = calc_relative_strength(index_df.loc[:,'adj_close'])
+	# index_rs_strength
+
+
+	stocklist = get_index_companies(index_symbol)
+
+	df = get_stock(stocklist)
+	df = df.dropna(axis=0, how='all')
+
+	st.text(f'Total stocks downloaded from {index_symbol} {df.shape[1]/2}')
+	st.text(f'Processing stocks..')
+	## Calculation on each column 
+	final = (df['adj_close']
+			 	.apply( [
+			          Current_Price,
+			          Avg_Price_Month,
+			          Perc_Change_Over_Year,
+			          lambda x: rs_rating(calc_relative_strength(x), index_rs_strength),
+			          SMA_50,
+			          SMA_150,
+			          SMA_200,
+			          SMA_200_20,
+			          Low_52week,
+			          High_52week
+			    ], 
+			    axis=0
+			  )
+			)
+
+
+	## rename lambda func
+	final = final.T.rename(columns={'<lambda>': "RS_rating"} ).T
+
+	## Calcualte average volyme
+	avg_vol = df['Volume'].apply(Avg_Volume)
+	avg_vol = avg_vol.rename('Average_Volume').to_frame().T
 	
+	## add the average volum to df 
+	final = final.append(avg_vol)
 
-		if num == 0:
-			continue
-		if num % 10 == 0:
-			for i in list(range(5))[::-1]:
-				having_break.text(f'waiting for {i}sec')
-				time.sleep(1)
-			# having_break = st.empty()
-		if num % 100 == 0:
-			for i in list(range(3))[::-1]:
-				having_break.text(f'waiting for {i}min')
-				time.sleep(60)
-			# having_break = st.empty()
-			# time.sleep(5*60)
+	## Check which columns (stocks) meet conditions
+	meet_conditions = final.apply(
+	    [
+	     condition1,
+	     condition2,
+	     condition3,
+	     condition4,
+	     condition5,
+	     condition6,
+	     condition7,
+	     condition8,
+	     min_average_volume,
+	     
+	     ])
+	# meet_conditions
 
-	final_df = pd.DataFrame(final)
-	# all_data_df = pd.DataFrame(all_data)
-	return final_df 
+	## select stocks that have meet all conditions
+	pass_conditions_idx = [k for k,v in meet_conditions.all().items() if v]
 
+	final = final.T
+	final = final.loc[final.index.isin(pass_conditions_idx)]
+	final.index = final.index.rename('ticker')
+	final = final.reset_index()
+	st.text(f'{len(final)} stocked passed Mark Minervin\'s conditions')
+	final['Company_Name'] = final.ticker.map(get_company_name)
+
+	column_order  = ['ticker','Company_Name', 'Current_Price','Average_Volume','Avg_Price_Month', 'Perc_Change_Over_Year',
+	       'RS_rating', 'SMA_50', 'SMA_150', 'SMA_200', 'SMA_200_20', 'Low_52week',
+	       'High_52week']
+	final = final[column_order]
+	final = final.round(2) ## round floats 
+
+	return final #.query('(Current_Price >= @min_price) & (Average_Volume >= @min_volume) & (RS_rating >= @min_rs_rating)')
+
+
+########
 
 #### ---- The App ---- ####
 ## ref: https://towardsdatascience.com/making-a-stock-screener-with-python-4f591b198261
 st.sidebar.header('Settings')
-index_tinker = st.sidebar.selectbox('Index', ['S&P500', 'DOW', 'NASDAQ', ] )
+index_symbol = st.sidebar.selectbox('Index', ['FTSE100', 'S&P500', 'DOW', 'NASDAQ' ] )
 min_volume = st.sidebar.text_input("Minimum Volume", 1e6)
 min_price = st.sidebar.slider('Minimum Price ($)', 0,5000, 0)
 days = st.sidebar.slider('Max Period (days)', 14, 730, 365)
 min_rs_rating = st.sidebar.slider('Minimum Relative Strange Rating', 1, 100, 70)
+
 with st.beta_container():
 	st.title('Mark Minervini’s Trend stock screener')
 	st.write('''
@@ -285,12 +331,13 @@ with st.beta_container():
 
 
 	if st.button('Start screening'):
-		# st.header('Socker screener')
+		st.header(f'Screen Stock for {index_symbol}')
 
-		final_df = stock_screener(index_tinker, min_volume, min_price, days, min_rs_rating)
+		final_df = stock_screener(index_symbol, min_volume, min_price, days, min_rs_rating)
 		st.dataframe(final_df)
 		
 		st.markdown(filedownload(final_df), unsafe_allow_html=True)
+		
 		st.set_option('deprecation.showPyplotGlobalUse', False)
 
 
